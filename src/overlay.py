@@ -6,7 +6,6 @@ from config import OVERLAY_COLOR, OVERLAY_OPACITY, SELECTION_COLOR
 from debug import log
 
 user32 = ctypes.windll.user32
-shcore = ctypes.windll.shcore if hasattr(ctypes.windll, "shcore") else None
 
 MIN_SELECTION_SIZE = 5
 TINY_SELECTION_WARNING_SIZE = 20
@@ -90,22 +89,20 @@ class SelectionOverlay:
         overlay.configure(bg=OVERLAY_COLOR)
         overlay.overrideredirect(True)
         overlay.geometry(f"{width}x{height}{left:+d}{top:+d}")
-        hwnd = overlay.winfo_id()
 
         canvas = tk.Canvas(overlay, cursor="cross", bg=OVERLAY_COLOR, highlightthickness=0)
         canvas.pack(fill=tk.BOTH, expand=True)
 
-        canvas.bind("<ButtonPress-1>", self._on_button_press)
-        canvas.bind("<B1-Motion>", self._on_mouse_drag)
-        canvas.bind("<ButtonRelease-1>", self._on_button_release)
-        canvas.bind("<Escape>", self._on_escape)
+        # Bind to the overlay window as well as the canvas to ensure events are captured
+        for target in (overlay, canvas):
+            target.bind("<ButtonPress-1>", self._on_button_press)
+            target.bind("<B1-Motion>", self._on_mouse_drag)
+            target.bind("<ButtonRelease-1>", self._on_button_release)
+            target.bind("<Escape>", self._on_escape)
 
         overlay.update_idletasks()
         overlay.deiconify()
         overlay.lift()
-        # Enforce physical positioning in case Tk applies logical scaling or misinterprets negative coords.
-        self._move_window(hwnd, left, top, width, height)
-        overlay.update_idletasks()
         log(
             f"Overlay realized: rootx={overlay.winfo_rootx()}, rooty={overlay.winfo_rooty()}, "
             f"width={overlay.winfo_width()}, height={overlay.winfo_height()}"
