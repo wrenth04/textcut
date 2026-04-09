@@ -91,7 +91,7 @@ class TextCutApp:
                     log("Clipboard copy failed")
                     self.show_toast("Error", "Failed to copy text to clipboard.")
             else:
-                self.show_toast("OCR Result", "No text found in selected region.")
+                self.show_toast("OCR Result", "No text found. Try selecting a larger area or bigger text.")
         finally:
             self.is_busy = False
             log("Capture finished")

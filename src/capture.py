@@ -9,6 +9,8 @@ gdi32 = ctypes.windll.gdi32
 SRCCOPY = 0x00CC0020
 DIB_RGB_COLORS = 0
 BI_RGB = 0
+COLORONCOLOR = 3
+UPSCALE_FACTOR = 3
 
 
 class BITMAPINFOHEADER(ctypes.Structure):
@@ -74,42 +76,56 @@ def capture_region(bbox: Tuple[int, int, int, int]) -> bytes:
     if width <= 0 or height <= 0:
         raise ValueError("Invalid capture region")
 
+    scaled_width = width * UPSCALE_FACTOR
+    scaled_height = height * UPSCALE_FACTOR
+    log(f"Upscaling capture to {scaled_width}x{scaled_height}")
+
     screen_dc = user32.GetDC(0)
-    mem_dc = gdi32.CreateCompatibleDC(screen_dc)
-    bitmap = gdi32.CreateCompatibleBitmap(screen_dc, width, height)
-    old_obj = gdi32.SelectObject(mem_dc, bitmap)
+    src_dc = gdi32.CreateCompatibleDC(screen_dc)
+    dst_dc = gdi32.CreateCompatibleDC(screen_dc)
+    src_bitmap = gdi32.CreateCompatibleBitmap(screen_dc, width, height)
+    dst_bitmap = gdi32.CreateCompatibleBitmap(screen_dc, scaled_width, scaled_height)
+    old_src_obj = gdi32.SelectObject(src_dc, src_bitmap)
+    old_dst_obj = gdi32.SelectObject(dst_dc, dst_bitmap)
 
     try:
-        if not gdi32.BitBlt(mem_dc, 0, 0, width, height, screen_dc, x1, y1, SRCCOPY):
+        if not gdi32.BitBlt(src_dc, 0, 0, width, height, screen_dc, x1, y1, SRCCOPY):
             raise RuntimeError("BitBlt failed")
+
+        gdi32.SetStretchBltMode(dst_dc, COLORONCOLOR)
+        if not gdi32.StretchBlt(dst_dc, 0, 0, scaled_width, scaled_height, src_dc, 0, 0, width, height, SRCCOPY):
+            raise RuntimeError("StretchBlt failed")
 
         bmi = BITMAPINFO()
         bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-        bmi.bmiHeader.biWidth = width
-        bmi.bmiHeader.biHeight = height
+        bmi.bmiHeader.biWidth = scaled_width
+        bmi.bmiHeader.biHeight = scaled_height
         bmi.bmiHeader.biPlanes = 1
         bmi.bmiHeader.biBitCount = 24
         bmi.bmiHeader.biCompression = BI_RGB
 
-        row_size = ((24 * width + 31) // 32) * 4
-        buffer_size = row_size * height
+        row_size = ((24 * scaled_width + 31) // 32) * 4
+        buffer_size = row_size * scaled_height
         buffer = ctypes.create_string_buffer(buffer_size)
 
         scan_lines = gdi32.GetDIBits(
-            mem_dc,
-            bitmap,
+            dst_dc,
+            dst_bitmap,
             0,
-            height,
+            scaled_height,
             buffer,
             ctypes.byref(bmi),
             DIB_RGB_COLORS,
         )
-        if scan_lines != height:
+        if scan_lines != scaled_height:
             raise RuntimeError("GetDIBits failed")
 
-        return _build_bmp_bytes(width, height, buffer.raw)
+        return _build_bmp_bytes(scaled_width, scaled_height, buffer.raw)
     finally:
-        gdi32.SelectObject(mem_dc, old_obj)
-        gdi32.DeleteObject(bitmap)
-        gdi32.DeleteDC(mem_dc)
+        gdi32.SelectObject(src_dc, old_src_obj)
+        gdi32.SelectObject(dst_dc, old_dst_obj)
+        gdi32.DeleteObject(src_bitmap)
+        gdi32.DeleteObject(dst_bitmap)
+        gdi32.DeleteDC(src_dc)
+        gdi32.DeleteDC(dst_dc)
         user32.ReleaseDC(0, screen_dc)
