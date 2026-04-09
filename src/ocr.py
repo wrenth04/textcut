@@ -52,6 +52,41 @@ Write-Output ($lines -join "`n")
 '''
 
 
+def _invert_bmp(bmp_bytes: bytes) -> bytes:
+    if len(bmp_bytes) < 54:
+        return bmp_bytes
+
+    # Width at 18, Height at 22 (4 bytes each, little endian)
+    width = int.from_bytes(bmp_bytes[18:22], "little")
+    height = int.from_bytes(bmp_bytes[22:26], "little")
+
+    # Standard BMP row padding: rows are aligned to 4 bytes
+    row_size = ((24 * width + 31) // 32) * 4
+    pixel_data = bytearray(bmp_bytes[54:])
+
+    # Only invert the actual pixel data, leave padding alone
+    for row in range(abs(height)):
+        row_start = row * row_size
+        row_end = row_start + (width * 3)
+        if row_end > len(pixel_data):
+            break
+        for i in range(row_start, row_end):
+            pixel_data[i] = 255 - pixel_data[i]
+
+    return bytes(bmp_bytes[:54] + pixel_data)
+
+
+def _score_text(text: str) -> int:
+    if not text:
+        return 0
+    score = 0
+    for char in text:
+        if char.isalnum():
+            score += 1
+        elif char in " ，。！？：；\"'()[]{}<>":
+            score += 0.1
+    return score
+
 def _normalize_ocr_text(text: str) -> str:
     cjk = r'\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af'
     cjk_punct = r'，。！？：；、「」『』（）〔〕【】《》〈〉、．・…—'
@@ -101,48 +136,66 @@ def sync_run_ocr(image_bytes: bytes) -> Optional[str]:
         env = os.environ.copy()
         env["TEXTCUT_OCR_IMAGE_PATH"] = temp_path
 
-        result = subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                POWERSHELL_OCR_SCRIPT,
-            ],
-            capture_output=True,
-            text=False,
-            timeout=30,
-            env=env,
-        )
+        def run_powershell_ocr() -> str:
+            result = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    POWERSHELL_OCR_SCRIPT,
+                ],
+                capture_output=True,
+                text=False,
+                timeout=30,
+                env=env,
+            )
 
-        def decode_output(data: bytes) -> str:
-            if not data:
+            def decode_output(data: bytes) -> str:
+                if not data:
+                    return ""
+                for encoding in ("utf-8-sig", "utf-8", "cp950", "cp936", "cp1252", "mbcs"):
+                    try:
+                        return data.decode(encoding).strip()
+                    except Exception:
+                        continue
+                return data.decode("utf-8", errors="replace").strip()
+
+            if result.returncode != 0:
                 return ""
-            for encoding in ("utf-8-sig", "utf-8", "cp950", "cp936", "cp1252", "mbcs"):
-                try:
-                    return data.decode(encoding).strip()
-                except Exception:
-                    continue
-            return data.decode("utf-8", errors="replace").strip()
+            return decode_output(result.stdout)
 
-        stdout_text = decode_output(result.stdout)
-        stderr_text = decode_output(result.stderr)
+        # Pass 1: Original image
+        text_orig = run_powershell_ocr()
+        log(f"Original OCR result: {repr(text_orig)}")
 
-        log(f"PowerShell OCR return code: {result.returncode}")
-        if stderr_text:
-            log(f"PowerShell OCR stderr: {stderr_text}")
-        text = stdout_text or None
-        log(f"PowerShell OCR stdout: {repr(text)}")
+        # Pass 2: Inverted image
+        inverted_bytes = _invert_bmp(image_bytes)
+        with open(temp_path, "wb") as f:
+            f.write(inverted_bytes)
+        text_inv = run_powershell_ocr()
+        log(f"Inverted OCR result: {repr(text_inv)}")
 
-        if result.returncode != 0:
+        # Pick the best result based on content score
+        score_orig = _score_text(text_orig)
+        score_inv = _score_text(text_inv)
+        log(f"Scores - Original: {score_orig}, Inverted: {score_inv}")
+
+        if score_inv > score_orig:
+            log("Choosing inverted variant as better result")
+            best_text = text_inv
+        else:
+            log("Choosing original variant as better result")
+            best_text = text_orig
+
+        if not best_text:
             return None
-        if not text:
-            return None
 
-        normalized_text = _normalize_ocr_text(text)
+        normalized_text = _normalize_ocr_text(best_text)
         log(f"Normalized OCR text: {repr(normalized_text)}")
         return normalized_text or None
+
     except Exception as e:
         log(f"OCR Error: {type(e).__name__}: {e}")
         print(f"OCR Error: {e}")
