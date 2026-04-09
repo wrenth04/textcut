@@ -7,6 +7,19 @@ from debug import log
 
 user32 = ctypes.windll.user32
 
+# Configure Win32 API signatures for positioning (Windows only)
+try:
+    user32.MoveWindow.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.BOOL]
+    user32.MoveWindow.restype = wintypes.BOOL
+    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    user32.SetWindowPos.restype = wintypes.BOOL
+except Exception:
+    pass
+
+SWP_NOSIZE = 0x0001
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
+
 MIN_SELECTION_SIZE = 5
 TINY_SELECTION_WARNING_SIZE = 20
 
@@ -112,7 +125,9 @@ class SelectionOverlay:
             dy = top - current_y
             if dx or dy:
                 hwnd = overlay.winfo_id()
-                user32.MoveWindow(hwnd, current_x + dx, current_y + dy, width, height, True)
+                moved = user32.MoveWindow(hwnd, current_x + dx, current_y + dy, width, height, True)
+                if not moved:
+                    user32.SetWindowPos(hwnd, 0, current_x + dx, current_y + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
                 overlay.update_idletasks()
         except Exception:
             pass
