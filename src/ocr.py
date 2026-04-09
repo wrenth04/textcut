@@ -1,49 +1,63 @@
-import asyncio
-import ctypes
 import os
+import subprocess
 import tempfile
 from typing import Optional
-from winrt.windows.graphics.imaging import BitmapDecoder
-from winrt.windows.media.ocr import OcrEngine
-from winrt.windows.storage import StorageFile
 from debug import log
 
 
-async def run_ocr(image_bytes: bytes) -> Optional[str]:
-    """Uses Windows built-in OCR to recognize text from image bytes."""
+POWERSHELL_OCR_SCRIPT = r'''
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$null = [Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime]
+$null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType=WindowsRuntime]
+$null = [Windows.Media.Ocr.OcrEngine, Windows.Media.Ocr, ContentType=WindowsRuntime]
+$path = $args[0]
+$file = [System.WindowsRuntimeSystemExtensions]::AsTask([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)).GetAwaiter().GetResult()
+$stream = [System.WindowsRuntimeSystemExtensions]::AsTask($file.OpenReadAsync()).GetAwaiter().GetResult()
+$decoder = [System.WindowsRuntimeSystemExtensions]::AsTask([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)).GetAwaiter().GetResult()
+$bitmap = [System.WindowsRuntimeSystemExtensions]::AsTask($decoder.GetSoftwareBitmapAsync()).GetAwaiter().GetResult()
+$engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+if ($null -eq $engine) { exit 3 }
+$result = [System.WindowsRuntimeSystemExtensions]::AsTask($engine.RecognizeAsync($bitmap)).GetAwaiter().GetResult()
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Write-Output $result.Text
+'''
+
+
+def sync_run_ocr(image_bytes: bytes) -> Optional[str]:
     temp_path = None
     try:
-        log(f"run_ocr called with {len(image_bytes)} bytes")
-        log("Creating OcrEngine")
-        engine = OcrEngine.try_create_from_user_profile_languages()
-        if not engine:
-            log("OcrEngine.try_create_from_user_profile_languages returned None")
-            return None
-
+        log(f"sync_run_ocr called with {len(image_bytes)} bytes")
         fd, temp_path = tempfile.mkstemp(suffix=".bmp", prefix="textcut_")
         os.close(fd)
         with open(temp_path, "wb") as f:
             f.write(image_bytes)
         log(f"Wrote temp image file: {temp_path}")
 
-        log("Awaiting StorageFile.get_file_from_path_async")
-        storage_file = await StorageFile.get_file_from_path_async(temp_path)
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                POWERSHELL_OCR_SCRIPT,
+                temp_path,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+        )
 
-        log("Awaiting storage_file.open_read_async")
-        stream = await storage_file.open_read_async()
+        log(f"PowerShell OCR return code: {result.returncode}")
+        if result.stderr:
+            log(f"PowerShell OCR stderr: {result.stderr.strip()}")
+        text = result.stdout.strip() if result.stdout else None
+        log(f"PowerShell OCR stdout: {repr(text)}")
 
-        log("Awaiting BitmapDecoder.create_async")
-        decoder = await BitmapDecoder.create_async(stream)
-
-        log("Awaiting decoder.get_software_bitmap_async")
-        bitmap = await decoder.get_software_bitmap_async()
-
-        log("Awaiting engine.recognize_async")
-        result = await engine.recognize_async(bitmap)
-
-        text = result.text.strip() if result.text else None
-        log(f"OCR raw result: {repr(text)}")
-        return text
+        if result.returncode != 0:
+            return None
+        return text or None
     except Exception as e:
         log(f"OCR Error: {type(e).__name__}: {e}")
         print(f"OCR Error: {e}")
@@ -55,16 +69,3 @@ async def run_ocr(image_bytes: bytes) -> Optional[str]:
                 log(f"Removed temp image file: {temp_path}")
             except Exception as cleanup_error:
                 log(f"Failed to remove temp image file: {cleanup_error}")
-
-
-def sync_run_ocr(image_bytes: bytes) -> Optional[str]:
-    """Synchronous wrapper for the async run_ocr."""
-    ole32 = ctypes.windll.ole32
-    COINIT_APARTMENTTHREADED = 0x2
-    init_result = ole32.CoInitializeEx(None, COINIT_APARTMENTTHREADED)
-    log(f"CoInitializeEx result: {init_result}")
-    try:
-        return asyncio.run(run_ocr(image_bytes))
-    finally:
-        if init_result in (0, 1):
-            ole32.CoUninitialize()
