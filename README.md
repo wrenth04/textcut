@@ -53,6 +53,8 @@ pyinstaller --onefile --noconsole --name textcut src/main.py
 ```
 打包後的檔案將位於 `dist/textcut.exe`。
 
+若要建立正式版本，推送像 `v1.0.0` 這樣的 tag 後，GitHub Actions 會自動建置並建立 Release。
+
 ## 🗺️ 未來計畫
 
 - [ ] **macOS 支援**: 整合 Apple Vision Framework 實現原生 OCR。
