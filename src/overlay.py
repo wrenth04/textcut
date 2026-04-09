@@ -7,19 +7,6 @@ from debug import log
 
 user32 = ctypes.windll.user32
 
-# Configure Win32 API signatures for positioning (Windows only)
-try:
-    user32.MoveWindow.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.BOOL]
-    user32.MoveWindow.restype = wintypes.BOOL
-    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
-    user32.SetWindowPos.restype = wintypes.BOOL
-except Exception:
-    pass
-
-SWP_NOSIZE = 0x0001
-SWP_NOZORDER = 0x0004
-SWP_NOACTIVATE = 0x0010
-
 MIN_SELECTION_SIZE = 5
 TINY_SELECTION_WARNING_SIZE = 20
 
@@ -103,17 +90,6 @@ class SelectionOverlay:
             overlay.update_idletasks()
             overlay.deiconify()
             overlay.lift()
-
-            # Force exact positioning to monitor coords to avoid gaps on negative-coord screens
-            try:
-                hwnd = overlay.winfo_id()
-                moved = user32.MoveWindow(hwnd, monitor[0], monitor[1], width, height, True)
-                if not moved:
-                    user32.SetWindowPos(hwnd, 0, monitor[0], monitor[1], width, height, SWP_NOZORDER | SWP_NOACTIVATE)
-                overlay.update_idletasks()
-            except Exception:
-                pass
-
             log(
                 f"Overlay realized: rootx={overlay.winfo_rootx()}, rooty={overlay.winfo_rooty()}, "
                 f"width={overlay.winfo_width()}, height={overlay.winfo_height()}"
