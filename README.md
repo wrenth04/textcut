@@ -55,6 +55,8 @@ pyinstaller --onefile --noconsole --name textcut src/main.py
 
 若要建立正式版本，推送像 `v1.0.0` 這樣的 tag 後，GitHub Actions 會自動建置並建立 Release。
 
+若要開啟 debug 記錄，可在啟動前設定環境變數 `TEXTCUT_DEBUG=1`，程式會將記錄寫到 `%TEMP%/textcut.log`。
+
 ## 🗺️ 未來計畫
 
 - [ ] **macOS 支援**: 整合 Apple Vision Framework 實現原生 OCR。
