@@ -43,7 +43,12 @@ $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
 if ($null -eq $engine) { exit 3 }
 $result = Await-AsyncOperation ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-Write-Output $result.Text
+if ($null -eq $result -or $null -eq $result.Lines) { exit 0 }
+$lines = @()
+foreach ($line in $result.Lines) {
+    $lines += $line.Text
+}
+Write-Output ($lines -join "`n")
 '''
 
 
@@ -73,11 +78,14 @@ def _normalize_ocr_text(text: str) -> str:
         text = re.sub(rf'([{cjk}])\s+([{cjk_punct}{ascii_punct}])', r'\1\2', text)
         text = re.sub(rf'([{cjk_punct}{ascii_punct}])\s+([{cjk}])', r'\1\2', text)
 
-    # Compress repeated spaces but preserve newlines.
-    text = re.sub(r'[ \t]+', ' ', text)
-    text = re.sub(r' *\n *', '\n', text)
+    # Normalize spaces per line while preserving line breaks.
+    lines = []
+    for line in text.split('\n'):
+        line = re.sub(r'[ \t]+', ' ', line).strip()
+        lines.append(line)
 
-    return text.strip()
+    # Keep non-empty lines and preserve their order.
+    return '\n'.join(line for line in lines if line).strip()
 
 
 def sync_run_ocr(image_bytes: bytes) -> Optional[str]:
