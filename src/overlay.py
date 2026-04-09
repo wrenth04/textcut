@@ -1,74 +1,136 @@
 import ctypes
 import tkinter as tk
-from typing import Tuple, Optional
+from ctypes import wintypes
+from typing import List, Optional, Tuple
 from config import OVERLAY_COLOR, OVERLAY_OPACITY, SELECTION_COLOR
 
 user32 = ctypes.windll.user32
-SM_XVIRTUALSCREEN = 76
-SM_YVIRTUALSCREEN = 77
-SM_CXVIRTUALSCREEN = 78
-SM_CYVIRTUALSCREEN = 79
+
+
+class RECT(ctypes.Structure):
+    _fields_ = [
+        ("left", wintypes.LONG),
+        ("top", wintypes.LONG),
+        ("right", wintypes.LONG),
+        ("bottom", wintypes.LONG),
+    ]
+
+
+MonitorEnumProc = ctypes.WINFUNCTYPE(
+    wintypes.BOOL,
+    wintypes.HMONITOR,
+    wintypes.HDC,
+    ctypes.POINTER(RECT),
+    wintypes.LPARAM,
+)
 
 
 class SelectionOverlay:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.overlay = None
-        self.canvas = None
+        self.overlays: List[tk.Toplevel] = []
+        self.canvases: List[tk.Canvas] = []
         self.start_x = 0
         self.start_y = 0
+        self.bbox: Optional[Tuple[int, int, int, int]] = None
+        self.drag_canvas: Optional[tk.Canvas] = None
         self.rect_id = None
-        self.bbox = None
+        self._callback_ref = None
 
     def get_selection(self) -> Optional[Tuple[int, int, int, int]]:
-        virtual_x = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
-        virtual_y = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
-        virtual_width = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
-        virtual_height = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+        monitors = self._get_monitors()
 
-        self.overlay = tk.Toplevel(self.root)
-        self.overlay.attributes("-topmost", True)
-        self.overlay.attributes("-alpha", OVERLAY_OPACITY)
-        self.overlay.configure(bg=OVERLAY_COLOR)
-        self.overlay.overrideredirect(True)
-        self.overlay.geometry(f"{virtual_width}x{virtual_height}{virtual_x:+d}{virtual_y:+d}")
+        for monitor in monitors:
+            overlay = tk.Toplevel(self.root)
+            overlay.attributes("-topmost", True)
+            overlay.attributes("-alpha", OVERLAY_OPACITY)
+            overlay.configure(bg=OVERLAY_COLOR)
+            overlay.overrideredirect(True)
+            width = monitor[2] - monitor[0]
+            height = monitor[3] - monitor[1]
+            overlay.geometry(f"{width}x{height}{monitor[0]:+d}{monitor[1]:+d}")
 
-        self.canvas = tk.Canvas(self.overlay, cursor="cross", bg=OVERLAY_COLOR, highlightthickness=0)
-        self.canvas.pack(fill=tk.BOTH, expand=True)
+            canvas = tk.Canvas(overlay, cursor="cross", bg=OVERLAY_COLOR, highlightthickness=0)
+            canvas.pack(fill=tk.BOTH, expand=True)
 
-        self.overlay.bind("<ButtonPress-1>", self._on_button_press)
-        self.overlay.bind("<B1-Motion>", self._on_mouse_drag)
-        self.overlay.bind("<ButtonRelease-1>", self._on_button_release)
-        self.overlay.bind("<Escape>", self._on_escape)
+            overlay.bind("<ButtonPress-1>", self._on_button_press)
+            overlay.bind("<B1-Motion>", self._on_mouse_drag)
+            overlay.bind("<ButtonRelease-1>", self._on_button_release)
+            overlay.bind("<Escape>", self._on_escape)
 
-        self.overlay.update_idletasks()
-        self.overlay.deiconify()
-        self.overlay.lift()
-        self.overlay.focus_force()
-        self.canvas.focus_set()
-        self.root.wait_window(self.overlay)
+            overlay.update_idletasks()
+            overlay.deiconify()
+            overlay.lift()
+            self.overlays.append(overlay)
+            self.canvases.append(canvas)
+
+        if self.overlays:
+            self.overlays[0].focus_force()
+            self.canvases[0].focus_set()
+            self.root.wait_window(self.overlays[0])
+
         return self.bbox
 
+    def _get_monitors(self) -> List[Tuple[int, int, int, int]]:
+        monitors: List[Tuple[int, int, int, int]] = []
+
+        def callback(hmonitor, hdc, rect_ptr, lparam):
+            rect = rect_ptr.contents
+            monitors.append((rect.left, rect.top, rect.right, rect.bottom))
+            return True
+
+        self._callback_ref = MonitorEnumProc(callback)
+        user32.EnumDisplayMonitors(0, 0, self._callback_ref, 0)
+        return monitors
+
     def _close(self):
-        if self.overlay is not None and self.overlay.winfo_exists():
-            self.overlay.destroy()
+        for overlay in self.overlays:
+            if overlay.winfo_exists():
+                overlay.destroy()
+        self.overlays.clear()
+        self.canvases.clear()
+        self.drag_canvas = None
+        self.rect_id = None
+
+    def _find_canvas_for_widget(self, widget) -> Optional[tk.Canvas]:
+        for canvas in self.canvases:
+            if str(canvas) == str(widget):
+                return canvas
+        return None
 
     def _on_button_press(self, event):
         self.start_x = event.x_root
         self.start_y = event.y_root
+        self.drag_canvas = self._find_canvas_for_widget(event.widget)
+        if self.drag_canvas is None:
+            return
         if self.rect_id:
-            self.canvas.delete(self.rect_id)
-        canvas_x = event.x_root - self.overlay.winfo_rootx()
-        canvas_y = event.y_root - self.overlay.winfo_rooty()
-        self.rect_id = self.canvas.create_rectangle(canvas_x, canvas_y, canvas_x, canvas_y, outline=SELECTION_COLOR, width=2)
+            self.drag_canvas.delete(self.rect_id)
+        canvas_x = event.x_root - self.drag_canvas.winfo_rootx()
+        canvas_y = event.y_root - self.drag_canvas.winfo_rooty()
+        self.rect_id = self.drag_canvas.create_rectangle(
+            canvas_x,
+            canvas_y,
+            canvas_x,
+            canvas_y,
+            outline=SELECTION_COLOR,
+            width=2,
+        )
 
     def _on_mouse_drag(self, event):
-        if self.rect_id:
-            start_canvas_x = self.start_x - self.overlay.winfo_rootx()
-            start_canvas_y = self.start_y - self.overlay.winfo_rooty()
-            current_canvas_x = event.x_root - self.overlay.winfo_rootx()
-            current_canvas_y = event.y_root - self.overlay.winfo_rooty()
-            self.canvas.coords(self.rect_id, start_canvas_x, start_canvas_y, current_canvas_x, current_canvas_y)
+        if self.drag_canvas is None or self.rect_id is None:
+            return
+        start_canvas_x = self.start_x - self.drag_canvas.winfo_rootx()
+        start_canvas_y = self.start_y - self.drag_canvas.winfo_rooty()
+        current_canvas_x = event.x_root - self.drag_canvas.winfo_rootx()
+        current_canvas_y = event.y_root - self.drag_canvas.winfo_rooty()
+        self.drag_canvas.coords(
+            self.rect_id,
+            start_canvas_x,
+            start_canvas_y,
+            current_canvas_x,
+            current_canvas_y,
+        )
 
     def _on_button_release(self, event):
         end_x = event.x_root

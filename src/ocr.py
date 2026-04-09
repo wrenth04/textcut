@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import tempfile
 from typing import Optional
@@ -44,6 +45,15 @@ $result = Await-AsyncOperation ($engine.RecognizeAsync($bitmap)) ([Windows.Media
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Write-Output $result.Text
 '''
+
+
+def _normalize_ocr_text(text: str) -> str:
+    # Remove spaces inserted between adjacent CJK characters, while preserving
+    # spaces between Latin words/numbers.
+    text = re.sub(r'([\u4e00-\u9fff])\s+([\u4e00-\u9fff])', r'\1\2', text)
+    text = re.sub(r'([\u3040-\u30ff])\s+([\u3040-\u30ff])', r'\1\2', text)
+    text = re.sub(r'([\uac00-\ud7af])\s+([\uac00-\ud7af])', r'\1\2', text)
+    return text.strip()
 
 
 def sync_run_ocr(image_bytes: bytes) -> Optional[str]:
@@ -95,7 +105,12 @@ def sync_run_ocr(image_bytes: bytes) -> Optional[str]:
 
         if result.returncode != 0:
             return None
-        return text or None
+        if not text:
+            return None
+
+        normalized_text = _normalize_ocr_text(text)
+        log(f"Normalized OCR text: {repr(normalized_text)}")
+        return normalized_text or None
     except Exception as e:
         log(f"OCR Error: {type(e).__name__}: {e}")
         print(f"OCR Error: {e}")
