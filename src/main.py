@@ -1,46 +1,49 @@
+import ctypes
+import platform
 import queue
 import threading
 import tkinter as tk
-import ctypes
 from hotkey import start_hotkey_listener
 from overlay import SelectionOverlay
 from ocr import sync_run_ocr
 from clipboard import copy_to_clipboard
 from debug import log
 
+
 def initialize_dpi_awareness():
     """
-    Initialize Windows DPI awareness to ensure coordinates from Tkinter
-    and Win32 GDI match physical screen pixels.
+    Initialize Windows DPI awareness so Tkinter coordinates match GDI screen pixels.
     """
-    if ctypes.windll.shell32:
-        try:
-            # Try modern Per-Monitor DPI Awareness V2 (Windows 10 1703+)
-            # PER_MONITOR_AWARE_V2 = 2
-            if ctypes.windll.user32.SetProcessDpiAwarenessContext(2) != 0:
-                log("DPI Awareness: SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2) succeeded")
-                return True
-        except Exception:
-            pass
+    if platform.system() != "Windows":
+        return False
 
-        try:
-            # Fallback to Per-Monitor DPI Awareness (Windows 8.1+)
-            # PROCESS_PER_MONITOR_DPI_AWARE = 2
-            if ctypes.windll.user32.SetProcessDpiAwareness(2) != 0:
-                log("DPI Awareness: SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE) succeeded")
-                return True
-        except Exception:
-            pass
+    user32 = ctypes.windll.user32
 
-        try:
-            # Fallback to System DPI Awareness (Windows XP+)
-            if ctypes.windll.user32.SetProcessDPIAware() != 0:
-                log("DPI Awareness: SetProcessDPIAware() succeeded")
-                return True
-        except Exception:
-            pass
+    try:
+        per_monitor_v2 = ctypes.c_void_p(-4)
+        if user32.SetProcessDpiAwarenessContext(per_monitor_v2):
+            log("DPI Awareness: SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2) succeeded")
+            return True
+    except Exception:
+        pass
 
-    log("DPI Awareness: Failed to set DPI awareness or not on Windows")
+    try:
+        shcore = ctypes.windll.shcore
+        process_per_monitor_dpi_aware = 2
+        if shcore.SetProcessDpiAwareness(process_per_monitor_dpi_aware) == 0:
+            log("DPI Awareness: SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE) succeeded")
+            return True
+    except Exception:
+        pass
+
+    try:
+        if user32.SetProcessDPIAware() != 0:
+            log("DPI Awareness: SetProcessDPIAware() succeeded")
+            return True
+    except Exception:
+        pass
+
+    log("DPI Awareness: Unable to change DPI awareness")
     return False
 
 class TextCutApp:
