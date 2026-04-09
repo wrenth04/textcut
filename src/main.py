@@ -1,10 +1,10 @@
 import sys
 import time
-from .hotkey import start_hotkey_listener
-from .overlay import SelectionOverlay
-from .capture import capture_region
-from .ocr import sync_run_ocr
-from .clipboard import copy_to_clipboard
+from hotkey import start_hotkey_listener
+from overlay import SelectionOverlay
+from capture import capture_region
+from ocr import sync_run_ocr
+from clipboard import copy_to_clipboard
 import tkinter as tk
 from tkinter import messagebox
 

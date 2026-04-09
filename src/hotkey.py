@@ -1,7 +1,7 @@
 import ctypes
 import threading
 from typing import Callable
-from .config import HOTKEY_MODIFIERS, HOTKEY_VK
+from config import HOTKEY_MODIFIERS, HOTKEY_VK
 
 user32 = ctypes.windll.user32
 

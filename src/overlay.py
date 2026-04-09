@@ -1,6 +1,6 @@
 import tkinter as tk
 from typing import Tuple, Optional
-from .config import OVERLAY_COLOR, OVERLAY_OPACITY, SELECTION_COLOR
+from config import OVERLAY_COLOR, OVERLAY_OPACITY, SELECTION_COLOR
 
 class SelectionOverlay:
     def __init__(self):

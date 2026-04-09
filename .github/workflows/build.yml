@@ -28,10 +28,11 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        pyinstaller --onefile --noconsole --name textcut src/main.py
+        cd src
+        pyinstaller --onefile --noconsole --name textcut main.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: textcut-windows-exe
-        path: dist/textcut.exe
+        path: src/dist/textcut.exe
