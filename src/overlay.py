@@ -7,16 +7,6 @@ from debug import log
 
 user32 = ctypes.windll.user32
 
-# Win32 API signatures and flags for positioning
-try:
-    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
-    user32.SetWindowPos.restype = wintypes.BOOL
-except Exception:
-    pass
-
-SWP_NOZORDER = 0x0004
-SWP_NOACTIVATE = 0x0010
-
 MIN_SELECTION_SIZE = 5
 TINY_SELECTION_WARNING_SIZE = 20
 
@@ -85,8 +75,8 @@ class SelectionOverlay:
 
             width = monitor[2] - monitor[0]
             height = monitor[3] - monitor[1]
-            # Set size only; position will be forced via Win32 to avoid Tk geometry quirks on negative coords
-            overlay.geometry(f"{width}x{height}")
+            # Set explicit size and position via Tk geometry only (no Win32 forcing)
+            overlay.geometry(f"{width}x{height}{monitor[0]:+d}{monitor[1]:+d}")
 
             canvas = tk.Canvas(overlay, cursor="cross", bg=OVERLAY_COLOR, highlightthickness=0)
             canvas.pack(fill=tk.BOTH, expand=True)
@@ -100,14 +90,6 @@ class SelectionOverlay:
             overlay.deiconify()
             overlay.lift()
             overlay.update_idletasks()
-
-            # Force absolute positioning in physical pixels
-            try:
-                hwnd = overlay.winfo_id()
-                user32.SetWindowPos(hwnd, 0, monitor[0], monitor[1], width, height, SWP_NOZORDER | SWP_NOACTIVATE)
-                overlay.update_idletasks()
-            except Exception:
-                pass
 
             log(
                 f"Overlay realized: rootx={overlay.winfo_rootx()}, rooty={overlay.winfo_rooty()}, "
