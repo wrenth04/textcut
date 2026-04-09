@@ -7,6 +7,17 @@ from debug import log
 
 user32 = ctypes.windll.user32
 
+# Win32 positioning signatures (used only to nudge overlay if Tk misplaces it)
+try:
+    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    user32.SetWindowPos.restype = wintypes.BOOL
+except Exception:
+    pass
+
+SWP_NOSIZE = 0x0001
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
+
 MIN_SELECTION_SIZE = 5
 TINY_SELECTION_WARNING_SIZE = 20
 
@@ -75,7 +86,7 @@ class SelectionOverlay:
 
             width = monitor[2] - monitor[0]
             height = monitor[3] - monitor[1]
-            # Set explicit size and position via Tk geometry only (no Win32 forcing)
+            # Place via Tk geometry
             overlay.geometry(f"{width}x{height}{monitor[0]:+d}{monitor[1]:+d}")
 
             canvas = tk.Canvas(overlay, cursor="cross", bg=OVERLAY_COLOR, highlightthickness=0)
@@ -90,6 +101,19 @@ class SelectionOverlay:
             overlay.deiconify()
             overlay.lift()
             overlay.update_idletasks()
+
+            # Nudge overlay to intended top-left if Tk left part uncovered (e.g., negative-coord monitors)
+            try:
+                desired_x, desired_y = monitor[0], monitor[1]
+                current_x, current_y = overlay.winfo_rootx(), overlay.winfo_rooty()
+                dx = desired_x - current_x
+                dy = desired_y - current_y
+                if dx or dy:
+                    hwnd = overlay.winfo_id()
+                    user32.SetWindowPos(hwnd, 0, current_x + dx, current_y + dy, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+                    overlay.update_idletasks()
+            except Exception:
+                pass
 
             log(
                 f"Overlay realized: rootx={overlay.winfo_rootx()}, rooty={overlay.winfo_rooty()}, "
