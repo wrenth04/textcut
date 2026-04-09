@@ -50,6 +50,11 @@ class TextCutApp:
     def __init__(self):
         initialize_dpi_awareness()
         self.root = tk.Tk()
+        try:
+            self.root.tk.call("tk", "scaling", 1.0)
+            log("Tk scaling forced to 1.0 for physical pixels")
+        except Exception:
+            pass
         self.root.withdraw()
         self.event_queue = queue.Queue()
         self.is_busy = False
