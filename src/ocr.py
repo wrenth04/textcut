@@ -48,11 +48,35 @@ Write-Output $result.Text
 
 
 def _normalize_ocr_text(text: str) -> str:
-    # Remove spaces inserted between adjacent CJK characters, while preserving
-    # spaces between Latin words/numbers.
-    text = re.sub(r'([\u4e00-\u9fff])\s+([\u4e00-\u9fff])', r'\1\2', text)
-    text = re.sub(r'([\u3040-\u30ff])\s+([\u3040-\u30ff])', r'\1\2', text)
-    text = re.sub(r'([\uac00-\ud7af])\s+([\uac00-\ud7af])', r'\1\2', text)
+    cjk = r'\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af'
+    cjk_punct = r'，。！？：；、「」『』（）〔〕【】《》〈〉、．・…—'
+    ascii_punct = r',\.!\?:;\(\)\[\]\{\}<>'
+
+    # Normalize line endings first.
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+    # Remove spaces between adjacent CJK characters.
+    text = re.sub(rf'([{cjk}])\s+([{cjk}])', r'\1\2', text)
+
+    # Remove spaces between CJK and punctuation in both directions.
+    text = re.sub(rf'([{cjk}])\s+([{cjk_punct}{ascii_punct}])', r'\1\2', text)
+    text = re.sub(rf'([{cjk_punct}{ascii_punct}])\s+([{cjk}])', r'\1\2', text)
+
+    # Collapse OCR-created spacing around hyphens/dashes between CJK fragments.
+    text = re.sub(rf'([{cjk}])\s*[-—]+\s*([{cjk}])', r'\1-\2', text)
+
+    # Remove spaces inside continuous CJK-heavy phrases iteratively.
+    previous = None
+    while previous != text:
+        previous = text
+        text = re.sub(rf'([{cjk}])\s+([{cjk}])', r'\1\2', text)
+        text = re.sub(rf'([{cjk}])\s+([{cjk_punct}{ascii_punct}])', r'\1\2', text)
+        text = re.sub(rf'([{cjk_punct}{ascii_punct}])\s+([{cjk}])', r'\1\2', text)
+
+    # Compress repeated spaces but preserve newlines.
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r' *\n *', '\n', text)
+
     return text.strip()
 
 
