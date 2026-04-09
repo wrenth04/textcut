@@ -65,6 +65,7 @@ class SelectionOverlay:
             overlay.update_idletasks()
             overlay.deiconify()
             overlay.lift()
+            log(f"Overlay realized: rootx={overlay.winfo_rootx()}, rooty={overlay.winfo_rooty()}, width={overlay.winfo_width()}, height={overlay.winfo_height()}")
             self.overlays.append(overlay)
             self.canvases.append(canvas)
 
@@ -80,6 +81,7 @@ class SelectionOverlay:
 
         def callback(hmonitor, hdc, rect_ptr, lparam):
             rect = rect_ptr.contents
+            log(f"Enumerating monitor: left={rect.left}, top={rect.top}, right={rect.right}, bottom={rect.bottom}")
             monitors.append((rect.left, rect.top, rect.right, rect.bottom))
             return True
 
@@ -103,6 +105,7 @@ class SelectionOverlay:
         return None
 
     def _on_button_press(self, event):
+        log(f"Mouse press: x_root={event.x_root}, y_root={event.y_root}, widget_rootx={event.widget.winfo_rootx()}, widget_rooty={event.widget.winfo_rooty()}")
         self.start_x = event.x_root
         self.start_y = event.y_root
         self.drag_canvas = self._find_canvas_for_widget(event.widget)
@@ -137,6 +140,7 @@ class SelectionOverlay:
         )
 
     def _on_button_release(self, event):
+        log(f"Mouse release: x_root={event.x_root}, y_root={event.y_root}, widget_rootx={event.widget.winfo_rootx()}, widget_rooty={event.widget.winfo_rooty()}")
         end_x = event.x_root
         end_y = event.y_root
         x1 = min(self.start_x, end_x)

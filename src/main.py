@@ -1,15 +1,51 @@
 import queue
 import threading
 import tkinter as tk
+import ctypes
 from hotkey import start_hotkey_listener
 from overlay import SelectionOverlay
 from ocr import sync_run_ocr
 from clipboard import copy_to_clipboard
 from debug import log
 
+def initialize_dpi_awareness():
+    """
+    Initialize Windows DPI awareness to ensure coordinates from Tkinter
+    and Win32 GDI match physical screen pixels.
+    """
+    if ctypes.windll.shell32:
+        try:
+            # Try modern Per-Monitor DPI Awareness V2 (Windows 10 1703+)
+            # PER_MONITOR_AWARE_V2 = 2
+            if ctypes.windll.user32.SetProcessDpiAwarenessContext(2) != 0:
+                log("DPI Awareness: SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2) succeeded")
+                return True
+        except Exception:
+            pass
+
+        try:
+            # Fallback to Per-Monitor DPI Awareness (Windows 8.1+)
+            # PROCESS_PER_MONITOR_DPI_AWARE = 2
+            if ctypes.windll.user32.SetProcessDpiAwareness(2) != 0:
+                log("DPI Awareness: SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE) succeeded")
+                return True
+        except Exception:
+            pass
+
+        try:
+            # Fallback to System DPI Awareness (Windows XP+)
+            if ctypes.windll.user32.SetProcessDPIAware() != 0:
+                log("DPI Awareness: SetProcessDPIAware() succeeded")
+                return True
+        except Exception:
+            pass
+
+    log("DPI Awareness: Failed to set DPI awareness or not on Windows")
+    return False
 
 class TextCutApp:
     def __init__(self):
+        initialize_dpi_awareness()
         self.root = tk.Tk()
         self.root.withdraw()
         self.event_queue = queue.Queue()

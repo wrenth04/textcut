@@ -97,6 +97,7 @@ def capture_region(bbox: Tuple[int, int, int, int], upscale_factor: int = UPSCAL
 
     try:
         if not gdi32.BitBlt(src_dc, 0, 0, width, height, screen_dc, x1, y1, SRCCOPY):
+            log(f"BitBlt failed for bbox={bbox}")
             raise RuntimeError("BitBlt failed")
 
         gdi32.SetStretchBltMode(dst_dc, COLORONCOLOR)
