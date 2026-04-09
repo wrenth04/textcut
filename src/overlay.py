@@ -62,6 +62,13 @@ class SelectionOverlay:
         except Exception:
             pass
 
+    def _move_window(self, hwnd: int, x: int, y: int, w: int, h: int):
+        try:
+            # MoveWindow uses physical pixels with the virtual screen origin.
+            user32.MoveWindow(hwnd, x, y, w, h, True)
+        except Exception:
+            pass
+
     def get_selection(self) -> Optional[Tuple[int, int, int, int]]:
         monitors = self._get_monitors()
         if not monitors:
@@ -83,6 +90,7 @@ class SelectionOverlay:
         overlay.configure(bg=OVERLAY_COLOR)
         overlay.overrideredirect(True)
         overlay.geometry(f"{width}x{height}{left:+d}{top:+d}")
+        hwnd = overlay.winfo_id()
 
         canvas = tk.Canvas(overlay, cursor="cross", bg=OVERLAY_COLOR, highlightthickness=0)
         canvas.pack(fill=tk.BOTH, expand=True)
@@ -95,6 +103,9 @@ class SelectionOverlay:
         overlay.update_idletasks()
         overlay.deiconify()
         overlay.lift()
+        # Enforce physical positioning in case Tk applies logical scaling or misinterprets negative coords.
+        self._move_window(hwnd, left, top, width, height)
+        overlay.update_idletasks()
         log(
             f"Overlay realized: rootx={overlay.winfo_rootx()}, rooty={overlay.winfo_rooty()}, "
             f"width={overlay.winfo_width()}, height={overlay.winfo_height()}"
