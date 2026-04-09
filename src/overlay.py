@@ -7,19 +7,6 @@ from debug import log
 
 user32 = ctypes.windll.user32
 
-# Configure Win32 API signatures for positioning (Windows only)
-try:
-    user32.MoveWindow.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.BOOL]
-    user32.MoveWindow.restype = wintypes.BOOL
-    user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
-    user32.SetWindowPos.restype = wintypes.BOOL
-except Exception:
-    pass
-
-SWP_NOSIZE = 0x0001
-SWP_NOZORDER = 0x0004
-SWP_NOACTIVATE = 0x0010
-
 MIN_SELECTION_SIZE = 5
 TINY_SELECTION_WARNING_SIZE = 20
 
@@ -74,73 +61,47 @@ class SelectionOverlay:
         except Exception:
             pass
 
-    def _move_window(self, hwnd: int, x: int, y: int, w: int, h: int):
-        try:
-            # MoveWindow uses physical pixels with the virtual screen origin.
-            user32.MoveWindow(hwnd, x, y, w, h, True)
-        except Exception:
-            pass
-
     def get_selection(self) -> Optional[Tuple[int, int, int, int]]:
         monitors = self._get_monitors()
         if not monitors:
             return None
 
-        left = min(monitor[0] for monitor in monitors)
-        top = min(monitor[1] for monitor in monitors)
-        right = max(monitor[2] for monitor in monitors)
-        bottom = max(monitor[3] for monitor in monitors)
-        width = right - left
-        height = bottom - top
-        log(f"Virtual desktop bounds (EnumDisplayMonitors): left={left}, top={top}, right={right}, bottom={bottom}, width={width}, height={height}")
-        self._log_system_metrics()
-        self._log_tk_scaling()
+        # Create one overlay per monitor (v1.0.0 behavior)
+        for monitor in monitors:
+            overlay = tk.Toplevel(self.root)
+            overlay.attributes("-topmost", True)
+            overlay.attributes("-alpha", OVERLAY_OPACITY)
+            overlay.configure(bg=OVERLAY_COLOR)
+            overlay.overrideredirect(True)
 
-        overlay = tk.Toplevel(self.root)
-        overlay.attributes("-topmost", True)
-        overlay.attributes("-alpha", OVERLAY_OPACITY)
-        overlay.configure(bg=OVERLAY_COLOR)
-        overlay.overrideredirect(True)
-        overlay.geometry(f"{width}x{height}{left:+d}{top:+d}")
+            width = monitor[2] - monitor[0]
+            height = monitor[3] - monitor[1]
+            overlay.geometry(f"{width}x{height}{monitor[0]:+d}{monitor[1]:+d}")
 
-        canvas = tk.Canvas(overlay, cursor="cross", bg=OVERLAY_COLOR, highlightthickness=0)
-        canvas.pack(fill=tk.BOTH, expand=True)
+            canvas = tk.Canvas(overlay, cursor="cross", bg=OVERLAY_COLOR, highlightthickness=0)
+            canvas.pack(fill=tk.BOTH, expand=True)
 
-        # Bind to the overlay window as well as the canvas to ensure events are captured
-        for target in (overlay, canvas):
-            target.bind("<ButtonPress-1>", self._on_button_press)
-            target.bind("<B1-Motion>", self._on_mouse_drag)
-            target.bind("<ButtonRelease-1>", self._on_button_release)
-            target.bind("<Escape>", self._on_escape)
+            for target in (overlay, canvas):
+                target.bind("<ButtonPress-1>", self._on_button_press)
+                target.bind("<B1-Motion>", self._on_mouse_drag)
+                target.bind("<ButtonRelease-1>", self._on_button_release)
+                target.bind("<Escape>", self._on_escape)
 
-        overlay.update_idletasks()
-        overlay.deiconify()
-        overlay.lift()
-
-        # Force overlay to the exact virtual desktop origin/size using SetWindowPos.
-        try:
-            hwnd = overlay.winfo_id()
-            ok = user32.SetWindowPos(hwnd, 0, left, top, width, height, SWP_NOZORDER | SWP_NOACTIVATE)
             overlay.update_idletasks()
-            if not ok:
-                log(f"SetWindowPos failed for overlay HWND={hwnd}")
-                self._close()
-                return None
-        except Exception as e:
-            log(f"SetWindowPos exception: {e}")
-            self._close()
-            return None
+            overlay.deiconify()
+            overlay.lift()
+            log(
+                f"Overlay realized: rootx={overlay.winfo_rootx()}, rooty={overlay.winfo_rooty()}, "
+                f"width={overlay.winfo_width()}, height={overlay.winfo_height()}"
+            )
+            self.overlays.append(overlay)
+            self.canvases.append(canvas)
 
-        log(
-            f"Overlay realized: rootx={overlay.winfo_rootx()}, rooty={overlay.winfo_rooty()}, "
-            f"width={overlay.winfo_width()}, height={overlay.winfo_height()}"
-        )
-        self.overlays.append(overlay)
-        self.canvases.append(canvas)
-
-        overlay.focus_force()
-        canvas.focus_set()
-        self.root.wait_window(overlay)
+        # Focus the first overlay to start capturing
+        if self.overlays:
+            self.overlays[0].focus_force()
+            self.canvases[0].focus_set()
+            self.root.wait_window(self.overlays[0])
 
         return self.bbox
 
