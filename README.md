@@ -39,9 +39,9 @@ python src/main.py
 
 - **語言**: Python
 - **OCR 引擎**: Windows WinRT OCR (`winrt.windows.media.ocr`)
-- **截圖模組**: `mss` (High-performance screen shot)
+- **截圖模組**: Windows GDI / `ctypes`
 - **UI 介面**: `tkinter` (用於選取覆蓋層與通知)
-- **影像處理**: `Pillow` (PIL)
+- **影像處理**: Windows API
 
 ## 📦 打包為執行檔 (.exe)
 

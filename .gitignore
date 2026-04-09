@@ -11,6 +11,7 @@ env/
 build/
 dist/
 *.spec
+!src/textcut.spec
 
 # IDEs
 .idea/

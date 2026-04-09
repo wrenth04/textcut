@@ -65,7 +65,7 @@ def show_toast(title, message):
     root.mainloop()
 
 def main():
-    print("TextCut started. Press Ctrl+Shift+Alt+S to capture text.")
+    print("TextCut started. Press Ctrl+Shift+C to capture text.")
 
     # Start global hotkey listener
     listener = start_hotkey_listener(on_hotkey_pressed)

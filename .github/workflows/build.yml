@@ -29,7 +29,7 @@ jobs:
     - name: Build with PyInstaller
       run: |
         cd src
-        pyinstaller --onefile --noconsole --name textcut main.py
+        pyinstaller --clean textcut.spec
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
