@@ -8,16 +8,39 @@ from debug import log
 POWERSHELL_OCR_SCRIPT = r'''
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $null = [Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime]
+$null = [Windows.Storage.Streams.IRandomAccessStreamWithContentType, Windows.Storage.Streams, ContentType=WindowsRuntime]
 $null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType=WindowsRuntime]
+$null = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics.Imaging, ContentType=WindowsRuntime]
 $null = [Windows.Media.Ocr.OcrEngine, Windows.Media.Ocr, ContentType=WindowsRuntime]
-$path = $args[0]
-$file = [System.WindowsRuntimeSystemExtensions]::AsTask([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)).GetAwaiter().GetResult()
-$stream = [System.WindowsRuntimeSystemExtensions]::AsTask($file.OpenReadAsync()).GetAwaiter().GetResult()
-$decoder = [System.WindowsRuntimeSystemExtensions]::AsTask([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)).GetAwaiter().GetResult()
-$bitmap = [System.WindowsRuntimeSystemExtensions]::AsTask($decoder.GetSoftwareBitmapAsync()).GetAwaiter().GetResult()
+$null = [Windows.Media.Ocr.OcrResult, Windows.Media.Ocr, ContentType=WindowsRuntime]
+
+function Await-AsyncOperation {
+    param(
+        [Parameter(Mandatory=$true)] $Operation,
+        [Parameter(Mandatory=$true)] [Type] $ResultType
+    )
+
+    $method = [System.WindowsRuntimeSystemExtensions].GetMethods() |
+        Where-Object {
+            $_.Name -eq 'AsTask' -and
+            $_.IsGenericMethodDefinition -and
+            $_.GetParameters().Count -eq 1
+        } |
+        Select-Object -First 1
+
+    $genericMethod = $method.MakeGenericMethod(@($ResultType))
+    $task = $genericMethod.Invoke($null, @($Operation))
+    return $task.GetAwaiter().GetResult()
+}
+
+$path = $env:TEXTCUT_OCR_IMAGE_PATH
+$file = Await-AsyncOperation ([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)) ([Windows.Storage.StorageFile])
+$stream = Await-AsyncOperation ($file.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
+$decoder = Await-AsyncOperation ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+$bitmap = Await-AsyncOperation ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
 $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
 if ($null -eq $engine) { exit 3 }
-$result = [System.WindowsRuntimeSystemExtensions]::AsTask($engine.RecognizeAsync($bitmap)).GetAwaiter().GetResult()
+$result = Await-AsyncOperation ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Write-Output $result.Text
 '''
@@ -33,6 +56,9 @@ def sync_run_ocr(image_bytes: bytes) -> Optional[str]:
             f.write(image_bytes)
         log(f"Wrote temp image file: {temp_path}")
 
+        env = os.environ.copy()
+        env["TEXTCUT_OCR_IMAGE_PATH"] = temp_path
+
         result = subprocess.run(
             [
                 "powershell",
@@ -41,18 +67,30 @@ def sync_run_ocr(image_bytes: bytes) -> Optional[str]:
                 "Bypass",
                 "-Command",
                 POWERSHELL_OCR_SCRIPT,
-                temp_path,
             ],
             capture_output=True,
-            text=True,
-            encoding="utf-8",
+            text=False,
             timeout=30,
+            env=env,
         )
 
+        def decode_output(data: bytes) -> str:
+            if not data:
+                return ""
+            for encoding in ("utf-8-sig", "utf-8", "cp950", "cp936", "cp1252", "mbcs"):
+                try:
+                    return data.decode(encoding).strip()
+                except Exception:
+                    continue
+            return data.decode("utf-8", errors="replace").strip()
+
+        stdout_text = decode_output(result.stdout)
+        stderr_text = decode_output(result.stderr)
+
         log(f"PowerShell OCR return code: {result.returncode}")
-        if result.stderr:
-            log(f"PowerShell OCR stderr: {result.stderr.strip()}")
-        text = result.stdout.strip() if result.stdout else None
+        if stderr_text:
+            log(f"PowerShell OCR stderr: {stderr_text}")
+        text = stdout_text or None
         log(f"PowerShell OCR stdout: {repr(text)}")
 
         if result.returncode != 0:
