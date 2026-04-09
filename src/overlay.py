@@ -43,36 +43,42 @@ class SelectionOverlay:
 
     def get_selection(self) -> Optional[Tuple[int, int, int, int]]:
         monitors = self._get_monitors()
+        if not monitors:
+            return None
 
-        for monitor in monitors:
-            overlay = tk.Toplevel(self.root)
-            overlay.attributes("-topmost", True)
-            overlay.attributes("-alpha", OVERLAY_OPACITY)
-            overlay.configure(bg=OVERLAY_COLOR)
-            overlay.overrideredirect(True)
-            width = monitor[2] - monitor[0]
-            height = monitor[3] - monitor[1]
-            overlay.geometry(f"{width}x{height}{monitor[0]:+d}{monitor[1]:+d}")
+        left = min(monitor[0] for monitor in monitors)
+        top = min(monitor[1] for monitor in monitors)
+        right = max(monitor[2] for monitor in monitors)
+        bottom = max(monitor[3] for monitor in monitors)
+        width = right - left
+        height = bottom - top
+        log(f"Virtual desktop bounds: left={left}, top={top}, right={right}, bottom={bottom}, width={width}, height={height}")
 
-            canvas = tk.Canvas(overlay, cursor="cross", bg=OVERLAY_COLOR, highlightthickness=0)
-            canvas.pack(fill=tk.BOTH, expand=True)
+        overlay = tk.Toplevel(self.root)
+        overlay.attributes("-topmost", True)
+        overlay.attributes("-alpha", OVERLAY_OPACITY)
+        overlay.configure(bg=OVERLAY_COLOR)
+        overlay.overrideredirect(True)
+        overlay.geometry(f"{width}x{height}{left:+d}{top:+d}")
 
-            overlay.bind("<ButtonPress-1>", self._on_button_press)
-            overlay.bind("<B1-Motion>", self._on_mouse_drag)
-            overlay.bind("<ButtonRelease-1>", self._on_button_release)
-            overlay.bind("<Escape>", self._on_escape)
+        canvas = tk.Canvas(overlay, cursor="cross", bg=OVERLAY_COLOR, highlightthickness=0)
+        canvas.pack(fill=tk.BOTH, expand=True)
 
-            overlay.update_idletasks()
-            overlay.deiconify()
-            overlay.lift()
-            log(f"Overlay realized: rootx={overlay.winfo_rootx()}, rooty={overlay.winfo_rooty()}, width={overlay.winfo_width()}, height={overlay.winfo_height()}")
-            self.overlays.append(overlay)
-            self.canvases.append(canvas)
+        canvas.bind("<ButtonPress-1>", self._on_button_press)
+        canvas.bind("<B1-Motion>", self._on_mouse_drag)
+        canvas.bind("<ButtonRelease-1>", self._on_button_release)
+        canvas.bind("<Escape>", self._on_escape)
 
-        if self.overlays:
-            self.overlays[0].focus_force()
-            self.canvases[0].focus_set()
-            self.root.wait_window(self.overlays[0])
+        overlay.update_idletasks()
+        overlay.deiconify()
+        overlay.lift()
+        log(f"Overlay realized: rootx={overlay.winfo_rootx()}, rooty={overlay.winfo_rooty()}, width={overlay.winfo_width()}, height={overlay.winfo_height()}")
+        self.overlays.append(overlay)
+        self.canvases.append(canvas)
+
+        overlay.focus_force()
+        canvas.focus_set()
+        self.root.wait_window(overlay)
 
         return self.bbox
 
