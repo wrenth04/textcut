@@ -103,6 +103,20 @@ class SelectionOverlay:
         overlay.update_idletasks()
         overlay.deiconify()
         overlay.lift()
+
+        # If Tk placed the window incorrectly (e.g., scaled or offset), nudge it by the observed delta.
+        try:
+            current_x = overlay.winfo_rootx()
+            current_y = overlay.winfo_rooty()
+            dx = left - current_x
+            dy = top - current_y
+            if dx or dy:
+                hwnd = overlay.winfo_id()
+                user32.MoveWindow(hwnd, current_x + dx, current_y + dy, width, height, True)
+                overlay.update_idletasks()
+        except Exception:
+            pass
+
         log(
             f"Overlay realized: rootx={overlay.winfo_rootx()}, rooty={overlay.winfo_rooty()}, "
             f"width={overlay.winfo_width()}, height={overlay.winfo_height()}"
