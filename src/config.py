@@ -8,8 +8,8 @@ MOD_CONTROL = 0x0002
 MOD_SHIFT = 0x0004
 MOD_WIN = 0x0008
 
-# Example: Ctrl + Shift + C
-HOTKEY_MODIFIERS = MOD_CONTROL | MOD_SHIFT
+# Example: Alt + C
+HOTKEY_MODIFIERS = MOD_ALT
 HOTKEY_VK = 0x43  # 'C' key
 
 # Overlay Configuration

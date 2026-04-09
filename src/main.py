@@ -34,7 +34,7 @@ class TextCutApp:
                     self.show_toast("TextCut", "Hotkey detected")
                     self.handle_capture()
                 elif event == "hotkey_registered":
-                    self.show_toast("TextCut", "Hotkey registered: Ctrl+Shift+C")
+                    self.show_toast("TextCut", "Hotkey registered: Alt+C")
                 elif isinstance(event, str) and event.startswith("hotkey_error:"):
                     error_code = event.split(":", 1)[1]
                     self.show_toast("TextCut Error", f"Hotkey registration failed: {error_code}")
