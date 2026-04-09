@@ -1,40 +1,53 @@
 import ctypes
+import ctypes.wintypes
 import threading
-from typing import Callable
+from typing import Callable, Optional
 from config import HOTKEY_MODIFIERS, HOTKEY_VK
 
 user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
+WM_HOTKEY = 0x0312
+WM_QUIT = 0x0012
+
 
 class HotkeyListener(threading.Thread):
-    def __init__(self, callback: Callable[[], None]):
+    def __init__(self, callback: Callable[[], None], status_callback: Optional[Callable[[str], None]] = None):
         super().__init__(daemon=True)
         self.callback = callback
+        self.status_callback = status_callback
         self._stop_event = threading.Event()
         self.hotkey_id = 1
+        self.thread_id = None
+
+    def _notify(self, message: str):
+        if self.status_callback:
+            self.status_callback(message)
 
     def run(self):
-        # Register the global hotkey
+        self.thread_id = kernel32.GetCurrentThreadId()
         if not user32.RegisterHotKey(None, self.hotkey_id, HOTKEY_MODIFIERS, HOTKEY_VK):
-            raise RuntimeError(f"Failed to register hotkey: {HOTKEY_MODIFIERS} + {hex(HOTKEY_VK)}")
+            error_code = ctypes.GetLastError()
+            self._notify(f"hotkey_error:{error_code}")
+            return
 
+        self._notify("hotkey_registered")
         msg = ctypes.wintypes.MSG()
         while not self._stop_event.is_set():
-            # PeekMessage or GetMessage. GetMessage blocks, which is fine for a daemon thread.
-            # We use a small timeout or similar if we needed to poll,
-            # but RegisterHotKey sends WM_HOTKEY to the thread's message queue.
-            if user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
-                if msg.message == 0x0312:  # WM_HOTKEY
-                    self.callback()
-                user32.TranslateMessage(ctypes.byref(msg))
-                user32.DispatchMessageW(ctypes.byref(msg))
+            result = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+            if result == 0 or msg.message == WM_QUIT:
+                break
+            if msg.message == WM_HOTKEY:
+                self.callback()
+
+        user32.UnregisterHotKey(None, self.hotkey_id)
 
     def stop(self):
         self._stop_event.set()
-        user32.UnregisterHotKey(None, self.hotkey_id)
-        # Post a dummy message to wake up GetMessageW
-        user32.PostQuitMessage(0)
+        if self.thread_id is not None:
+            user32.PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0)
 
-def start_hotkey_listener(callback: Callable[[], None]) -> HotkeyListener:
-    listener = HotkeyListener(callback)
+
+def start_hotkey_listener(callback: Callable[[], None], status_callback: Optional[Callable[[str], None]] = None) -> HotkeyListener:
+    listener = HotkeyListener(callback, status_callback)
     listener.start()
     return listener

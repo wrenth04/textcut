@@ -2,4 +2,5 @@ winrt-runtime
 winrt-Windows.Foundation
 winrt-Windows.Graphics.Imaging
 winrt-Windows.Media.Ocr
+winrt-Windows.Storage
 winrt-Windows.Storage.Streams

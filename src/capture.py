@@ -1,6 +1,7 @@
 import ctypes
 from ctypes import wintypes
 from typing import Tuple
+from debug import log
 
 user32 = ctypes.windll.user32
 gdi32 = ctypes.windll.gdi32
@@ -68,6 +69,7 @@ def capture_region(bbox: Tuple[int, int, int, int]) -> bytes:
     x1, y1, x2, y2 = bbox
     width = x2 - x1
     height = y2 - y1
+    log(f"capture_region called with bbox={bbox}, width={width}, height={height}")
 
     if width <= 0 or height <= 0:
         raise ValueError("Invalid capture region")

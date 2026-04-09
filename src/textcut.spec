@@ -2,15 +2,31 @@
 from PyInstaller.utils.hooks import collect_all
 
 winrt_datas, winrt_binaries, winrt_hiddenimports = collect_all('winrt')
+storage_datas, storage_binaries, storage_hiddenimports = collect_all('winrt.windows.storage')
+streams_datas, streams_binaries, streams_hiddenimports = collect_all('winrt.windows.storage.streams')
+imaging_datas, imaging_binaries, imaging_hiddenimports = collect_all('winrt.windows.graphics.imaging')
+ocr_datas, ocr_binaries, ocr_hiddenimports = collect_all('winrt.windows.media.ocr')
 
 hiddenimports = []
 hiddenimports += winrt_hiddenimports
+hiddenimports += storage_hiddenimports
+hiddenimports += streams_hiddenimports
+hiddenimports += imaging_hiddenimports
+hiddenimports += ocr_hiddenimports
 
 datas = []
 datas += winrt_datas
+datas += storage_datas
+datas += streams_datas
+datas += imaging_datas
+datas += ocr_datas
 
 binaries = []
 binaries += winrt_binaries
+binaries += storage_binaries
+binaries += streams_binaries
+binaries += imaging_binaries
+binaries += ocr_binaries
 
 
 a = Analysis(
@@ -41,7 +57,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
