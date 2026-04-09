@@ -1,10 +1,15 @@
 import ctypes
 from ctypes import wintypes
+import platform
 from typing import Tuple
 from debug import log
 
-user32 = ctypes.windll.user32
-gdi32 = ctypes.windll.gdi32
+if platform.system() == "Windows":
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+else:
+    user32 = None
+    gdi32 = None
 
 SRCCOPY = 0x00CC0020
 DIB_RGB_COLORS = 0
@@ -67,18 +72,20 @@ def _build_bmp_bytes(width: int, height: int, pixel_data: bytes) -> bytes:
     return bytes(file_header + info_header) + pixel_data
 
 
-def capture_region(bbox: Tuple[int, int, int, int]) -> bytes:
+def capture_region(bbox: Tuple[int, int, int, int], upscale_factor: int = UPSCALE_FACTOR) -> bytes:
     x1, y1, x2, y2 = bbox
     width = x2 - x1
     height = y2 - y1
     log(f"capture_region called with bbox={bbox}, width={width}, height={height}")
 
+    if user32 is None or gdi32 is None:
+        raise RuntimeError("Windows APIs are only available on Windows")
     if width <= 0 or height <= 0:
         raise ValueError("Invalid capture region")
 
-    scaled_width = width * UPSCALE_FACTOR
-    scaled_height = height * UPSCALE_FACTOR
-    log(f"Upscaling capture to {scaled_width}x{scaled_height}")
+    scaled_width = width * upscale_factor
+    scaled_height = height * upscale_factor
+    log(f"Upscaling capture to {scaled_width}x{scaled_height} (factor: {upscale_factor})")
 
     screen_dc = user32.GetDC(0)
     src_dc = gdi32.CreateCompatibleDC(screen_dc)

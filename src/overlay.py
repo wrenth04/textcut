@@ -3,8 +3,12 @@ import tkinter as tk
 from ctypes import wintypes
 from typing import List, Optional, Tuple
 from config import OVERLAY_COLOR, OVERLAY_OPACITY, SELECTION_COLOR
+from debug import log
 
 user32 = ctypes.windll.user32
+
+MIN_SELECTION_SIZE = 5
+TINY_SELECTION_WARNING_SIZE = 20
 
 
 class RECT(ctypes.Structure):
@@ -139,8 +143,12 @@ class SelectionOverlay:
         y1 = min(self.start_y, end_y)
         x2 = max(self.start_x, end_x)
         y2 = max(self.start_y, end_y)
+        width = x2 - x1
+        height = y2 - y1
 
-        if x2 - x1 > 5 and y2 - y1 > 5:
+        if width > MIN_SELECTION_SIZE and height > MIN_SELECTION_SIZE:
+            if width <= TINY_SELECTION_WARNING_SIZE or height <= TINY_SELECTION_WARNING_SIZE:
+                log(f"Tiny selection captured: width={width}, height={height}")
             self.bbox = (x1, y1, x2, y2)
         else:
             self.bbox = None

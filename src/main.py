@@ -3,7 +3,6 @@ import threading
 import tkinter as tk
 from hotkey import start_hotkey_listener
 from overlay import SelectionOverlay
-from capture import capture_region
 from ocr import sync_run_ocr
 from clipboard import copy_to_clipboard
 from debug import log
@@ -60,29 +59,30 @@ class TextCutApp:
                 self.is_busy = False
                 return
 
-            image_bytes = capture_region(bbox)
-            log(f"Captured image bytes: {len(image_bytes)}")
             self.show_toast("TextCut", "Running OCR...")
-            threading.Thread(target=self._run_ocr_worker, args=(image_bytes,), daemon=True).start()
+            threading.Thread(target=self._run_ocr_worker, args=(bbox,), daemon=True).start()
         except Exception as e:
             log(f"Capture error: {e}")
             self.show_toast("Error", str(e))
             self.is_busy = False
             log("Capture finished")
 
-    def _run_ocr_worker(self, image_bytes):
+    def _run_ocr_worker(self, bbox):
         try:
             log("OCR worker started")
-            text = sync_run_ocr(image_bytes)
+            result = sync_run_ocr(bbox)
+            text = result["text"]
             log(f"OCR worker finished with length: {0 if not text else len(text)}")
-            self.event_queue.put(("ocr_done", text))
+            self.event_queue.put(("ocr_done", result))
         except Exception as e:
             log(f"OCR worker error: {e}")
             self.event_queue.put(("ocr_error", str(e)))
 
-    def _handle_ocr_result(self, text):
+    def _handle_ocr_result(self, result):
         try:
             self.show_toast("TextCut", "OCR finished")
+            text = result["text"]
+            status = result["status"]
             if text:
                 if copy_to_clipboard(self.root, text):
                     log("Clipboard copy succeeded")
@@ -90,6 +90,8 @@ class TextCutApp:
                 else:
                     log("Clipboard copy failed")
                     self.show_toast("Error", "Failed to copy text to clipboard.")
+            elif status == "low_confidence":
+                self.show_toast("OCR Result", "Text may be too small or unclear. Try selecting a slightly larger area.")
             else:
                 self.show_toast("OCR Result", "No text found. Try selecting a larger area or bigger text.")
         finally:

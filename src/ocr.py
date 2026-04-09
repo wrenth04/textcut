@@ -2,7 +2,8 @@ import os
 import re
 import subprocess
 import tempfile
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
+from capture import capture_region
 from debug import log
 
 
@@ -51,21 +52,38 @@ foreach ($line in $result.Lines) {
 Write-Output ($lines -join "`n")
 '''
 
+DEFAULT_UPSCALE_FACTORS = [3]
+SMALL_TEXT_UPSCALE_FACTORS = [3, 4, 5]
+SMALL_SELECTION_WIDTH = 160
+SMALL_SELECTION_HEIGHT = 80
+SMALL_SELECTION_AREA = 20000
+LOW_CONFIDENCE_SCORE = 3
+
+
+OCRResult = Dict[str, Optional[str]]
+
+
+def _parse_bmp_dimensions(bmp_bytes: bytes) -> Tuple[int, int]:
+    if len(bmp_bytes) < 54:
+        raise ValueError("Invalid BMP data")
+    width = int.from_bytes(bmp_bytes[18:22], "little", signed=True)
+    height = int.from_bytes(bmp_bytes[22:26], "little", signed=True)
+    return abs(width), abs(height)
+
+
+def _get_bmp_row_size(width: int) -> int:
+    return ((24 * width + 31) // 32) * 4
+
 
 def _invert_bmp(bmp_bytes: bytes) -> bytes:
     if len(bmp_bytes) < 54:
         return bmp_bytes
 
-    # Width at 18, Height at 22 (4 bytes each, little endian)
-    width = int.from_bytes(bmp_bytes[18:22], "little")
-    height = int.from_bytes(bmp_bytes[22:26], "little")
-
-    # Standard BMP row padding: rows are aligned to 4 bytes
-    row_size = ((24 * width + 31) // 32) * 4
+    width, height = _parse_bmp_dimensions(bmp_bytes)
+    row_size = _get_bmp_row_size(width)
     pixel_data = bytearray(bmp_bytes[54:])
 
-    # Only invert the actual pixel data, leave padding alone
-    for row in range(abs(height)):
+    for row in range(height):
         row_start = row * row_size
         row_end = row_start + (width * 3)
         if row_end > len(pixel_data):
@@ -76,36 +94,66 @@ def _invert_bmp(bmp_bytes: bytes) -> bytes:
     return bytes(bmp_bytes[:54] + pixel_data)
 
 
-def _score_text(text: str) -> int:
+def _high_contrast_bmp(bmp_bytes: bytes, threshold: int = 180) -> bytes:
+    if len(bmp_bytes) < 54:
+        return bmp_bytes
+
+    width, height = _parse_bmp_dimensions(bmp_bytes)
+    row_size = _get_bmp_row_size(width)
+    pixel_data = bytearray(bmp_bytes[54:])
+
+    for row in range(height):
+        row_start = row * row_size
+        row_end = row_start + (width * 3)
+        if row_end > len(pixel_data):
+            break
+        for i in range(row_start, row_end, 3):
+            b = pixel_data[i]
+            g = pixel_data[i + 1]
+            r = pixel_data[i + 2]
+            gray = (r * 30 + g * 59 + b * 11) // 100
+            value = 255 if gray >= threshold else 0
+            pixel_data[i] = value
+            pixel_data[i + 1] = value
+            pixel_data[i + 2] = value
+
+    return bytes(bmp_bytes[:54] + pixel_data)
+
+
+def _score_text(text: str) -> float:
     if not text:
         return 0
-    score = 0
+
+    score = 0.0
     for char in text:
         if char.isalnum():
-            score += 1
+            score += 1.0
         elif char in " ，。！？：；\"'()[]{}<>":
-            score += 0.1
+            score += 0.2
+        elif char.isspace():
+            score += 0.05
+        else:
+            score -= 0.15
+
+    stripped = text.strip()
+    if len(stripped) >= 4:
+        score += min(len(stripped) * 0.1, 2.0)
+    if re.search(r"[A-Za-z0-9\u4e00-\u9fff]", stripped):
+        score += 1.0
     return score
+
 
 def _normalize_ocr_text(text: str) -> str:
     cjk = r'\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af'
     cjk_punct = r'，。！？：；、「」『』（）〔〕【】《》〈〉、．・…—'
     ascii_punct = r',\.!\?:;\(\)\[\]\{\}<>'
 
-    # Normalize line endings first.
     text = text.replace('\r\n', '\n').replace('\r', '\n')
-
-    # Remove spaces between adjacent CJK characters.
     text = re.sub(rf'([{cjk}])\s+([{cjk}])', r'\1\2', text)
-
-    # Remove spaces between CJK and punctuation in both directions.
     text = re.sub(rf'([{cjk}])\s+([{cjk_punct}{ascii_punct}])', r'\1\2', text)
     text = re.sub(rf'([{cjk_punct}{ascii_punct}])\s+([{cjk}])', r'\1\2', text)
-
-    # Collapse OCR-created spacing around hyphens/dashes between CJK fragments.
     text = re.sub(rf'([{cjk}])\s*[-—]+\s*([{cjk}])', r'\1-\2', text)
 
-    # Remove spaces inside continuous CJK-heavy phrases iteratively.
     previous = None
     while previous != text:
         previous = text
@@ -113,97 +161,123 @@ def _normalize_ocr_text(text: str) -> str:
         text = re.sub(rf'([{cjk}])\s+([{cjk_punct}{ascii_punct}])', r'\1\2', text)
         text = re.sub(rf'([{cjk_punct}{ascii_punct}])\s+([{cjk}])', r'\1\2', text)
 
-    # Normalize spaces per line while preserving line breaks.
     lines = []
     for line in text.split('\n'):
         line = re.sub(r'[ \t]+', ' ', line).strip()
         lines.append(line)
 
-    # Keep non-empty lines and preserve their order.
     return '\n'.join(line for line in lines if line).strip()
 
 
-def sync_run_ocr(image_bytes: bytes) -> Optional[str]:
+def _is_small_selection(bbox: Tuple[int, int, int, int]) -> bool:
+    x1, y1, x2, y2 = bbox
+    width = x2 - x1
+    height = y2 - y1
+    return (
+        width <= SMALL_SELECTION_WIDTH
+        or height <= SMALL_SELECTION_HEIGHT
+        or width * height <= SMALL_SELECTION_AREA
+    )
+
+
+def _variant_specs_for_bbox(bbox: Tuple[int, int, int, int]) -> List[Tuple[int, str]]:
+    factors = SMALL_TEXT_UPSCALE_FACTORS if _is_small_selection(bbox) else DEFAULT_UPSCALE_FACTORS
+    specs: List[Tuple[int, str]] = []
+    for factor in factors:
+        specs.append((factor, "original"))
+        specs.append((factor, "inverted"))
+        if _is_small_selection(bbox):
+            specs.append((factor, "high_contrast"))
+    return specs
+
+
+def _prepare_variant(bbox: Tuple[int, int, int, int], upscale_factor: int, variant: str) -> bytes:
+    bmp_bytes = capture_region(bbox, upscale_factor=upscale_factor)
+    if variant == "original":
+        return bmp_bytes
+    if variant == "inverted":
+        return _invert_bmp(bmp_bytes)
+    if variant == "high_contrast":
+        return _high_contrast_bmp(bmp_bytes)
+    raise ValueError(f"Unsupported OCR variant: {variant}")
+
+
+def _run_powershell_ocr(image_bytes: bytes) -> str:
     temp_path = None
     try:
-        log(f"sync_run_ocr called with {len(image_bytes)} bytes")
         fd, temp_path = tempfile.mkstemp(suffix=".bmp", prefix="textcut_")
         os.close(fd)
         with open(temp_path, "wb") as f:
             f.write(image_bytes)
-        log(f"Wrote temp image file: {temp_path}")
 
         env = os.environ.copy()
         env["TEXTCUT_OCR_IMAGE_PATH"] = temp_path
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                POWERSHELL_OCR_SCRIPT,
+            ],
+            capture_output=True,
+            text=False,
+            timeout=30,
+            env=env,
+        )
 
-        def run_powershell_ocr() -> str:
-            result = subprocess.run(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-Command",
-                    POWERSHELL_OCR_SCRIPT,
-                ],
-                capture_output=True,
-                text=False,
-                timeout=30,
-                env=env,
-            )
-
-            def decode_output(data: bytes) -> str:
-                if not data:
-                    return ""
-                for encoding in ("utf-8-sig", "utf-8", "cp950", "cp936", "cp1252", "mbcs"):
-                    try:
-                        return data.decode(encoding).strip()
-                    except Exception:
-                        continue
-                return data.decode("utf-8", errors="replace").strip()
-
-            if result.returncode != 0:
+        def decode_output(data: bytes) -> str:
+            if not data:
                 return ""
-            return decode_output(result.stdout)
+            for encoding in ("utf-8-sig", "utf-8", "cp950", "cp936", "cp1252", "mbcs"):
+                try:
+                    return data.decode(encoding).strip()
+                except Exception:
+                    continue
+            return data.decode("utf-8", errors="replace").strip()
 
-        # Pass 1: Original image
-        text_orig = run_powershell_ocr()
-        log(f"Original OCR result: {repr(text_orig)}")
-
-        # Pass 2: Inverted image
-        inverted_bytes = _invert_bmp(image_bytes)
-        with open(temp_path, "wb") as f:
-            f.write(inverted_bytes)
-        text_inv = run_powershell_ocr()
-        log(f"Inverted OCR result: {repr(text_inv)}")
-
-        # Pick the best result based on content score
-        score_orig = _score_text(text_orig)
-        score_inv = _score_text(text_inv)
-        log(f"Scores - Original: {score_orig}, Inverted: {score_inv}")
-
-        if score_inv > score_orig:
-            log("Choosing inverted variant as better result")
-            best_text = text_inv
-        else:
-            log("Choosing original variant as better result")
-            best_text = text_orig
-
-        if not best_text:
-            return None
-
-        normalized_text = _normalize_ocr_text(best_text)
-        log(f"Normalized OCR text: {repr(normalized_text)}")
-        return normalized_text or None
-
-    except Exception as e:
-        log(f"OCR Error: {type(e).__name__}: {e}")
-        print(f"OCR Error: {e}")
-        return None
+        if result.returncode != 0:
+            stderr = decode_output(result.stderr)
+            log(f"PowerShell OCR failed with code {result.returncode}: {stderr}")
+            return ""
+        return decode_output(result.stdout)
     finally:
         if temp_path and os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
-                log(f"Removed temp image file: {temp_path}")
             except Exception as cleanup_error:
                 log(f"Failed to remove temp image file: {cleanup_error}")
+
+
+def sync_run_ocr(bbox: Tuple[int, int, int, int]) -> OCRResult:
+    try:
+        log(f"sync_run_ocr called with bbox={bbox}")
+        best_text = ""
+        best_score = 0.0
+        best_variant = None
+
+        for upscale_factor, variant in _variant_specs_for_bbox(bbox):
+            image_bytes = _prepare_variant(bbox, upscale_factor, variant)
+            width, height = _parse_bmp_dimensions(image_bytes)
+            log(f"Running OCR variant={variant}, factor={upscale_factor}, size={width}x{height}")
+            text = _run_powershell_ocr(image_bytes)
+            score = _score_text(text)
+            log(f"OCR variant={variant}, factor={upscale_factor}, score={score}, text={repr(text)}")
+            if score > best_score:
+                best_score = score
+                best_text = text
+                best_variant = f"{variant}@{upscale_factor}x"
+
+        normalized_text = _normalize_ocr_text(best_text) if best_text else ""
+        if normalized_text:
+            log(f"Best OCR result chosen from {best_variant}: {repr(normalized_text)}")
+            return {"status": "success", "text": normalized_text}
+
+        status = "low_confidence" if _is_small_selection(bbox) or best_score > 0 else "no_text"
+        log(f"OCR finished without reliable text. status={status}, best_score={best_score}, variant={best_variant}")
+        return {"status": status, "text": None}
+    except Exception as e:
+        log(f"OCR Error: {type(e).__name__}: {e}")
+        print(f"OCR Error: {e}")
+        return {"status": "error", "text": None}
