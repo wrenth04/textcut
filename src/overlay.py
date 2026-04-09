@@ -6,6 +6,7 @@ from config import OVERLAY_COLOR, OVERLAY_OPACITY, SELECTION_COLOR
 from debug import log
 
 user32 = ctypes.windll.user32
+shcore = ctypes.windll.shcore if hasattr(ctypes.windll, "shcore") else None
 
 MIN_SELECTION_SIZE = 5
 TINY_SELECTION_WARNING_SIZE = 20
@@ -41,6 +42,26 @@ class SelectionOverlay:
         self.rect_id = None
         self._callback_ref = None
 
+    def _log_system_metrics(self):
+        try:
+            sm_x = user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
+            sm_y = user32.GetSystemMetrics(77)  # SM_YVIRTUALSCREEN
+            sm_cx = user32.GetSystemMetrics(78)  # SM_CXVIRTUALSCREEN
+            sm_cy = user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
+            log(f"System metrics virtual screen: left={sm_x}, top={sm_y}, width={sm_cx}, height={sm_cy}")
+        except Exception:
+            pass
+
+    def _log_tk_scaling(self):
+        try:
+            scaling = self.root.tk.call("tk", "scaling")
+            fpix = self.root.winfo_fpixels("1i")
+            sw = self.root.winfo_screenwidth()
+            sh = self.root.winfo_screenheight()
+            log(f"Tk scaling={scaling}, fpixels(1i)={fpix}, screen={sw}x{sh}")
+        except Exception:
+            pass
+
     def get_selection(self) -> Optional[Tuple[int, int, int, int]]:
         monitors = self._get_monitors()
         if not monitors:
@@ -52,7 +73,9 @@ class SelectionOverlay:
         bottom = max(monitor[3] for monitor in monitors)
         width = right - left
         height = bottom - top
-        log(f"Virtual desktop bounds: left={left}, top={top}, right={right}, bottom={bottom}, width={width}, height={height}")
+        log(f"Virtual desktop bounds (EnumDisplayMonitors): left={left}, top={top}, right={right}, bottom={bottom}, width={width}, height={height}")
+        self._log_system_metrics()
+        self._log_tk_scaling()
 
         overlay = tk.Toplevel(self.root)
         overlay.attributes("-topmost", True)
@@ -72,7 +95,10 @@ class SelectionOverlay:
         overlay.update_idletasks()
         overlay.deiconify()
         overlay.lift()
-        log(f"Overlay realized: rootx={overlay.winfo_rootx()}, rooty={overlay.winfo_rooty()}, width={overlay.winfo_width()}, height={overlay.winfo_height()}")
+        log(
+            f"Overlay realized: rootx={overlay.winfo_rootx()}, rooty={overlay.winfo_rooty()}, "
+            f"width={overlay.winfo_width()}, height={overlay.winfo_height()}"
+        )
         self.overlays.append(overlay)
         self.canvases.append(canvas)
 
@@ -111,7 +137,10 @@ class SelectionOverlay:
         return None
 
     def _on_button_press(self, event):
-        log(f"Mouse press: x_root={event.x_root}, y_root={event.y_root}, widget_rootx={event.widget.winfo_rootx()}, widget_rooty={event.widget.winfo_rooty()}")
+        log(
+            f"Mouse press: x_root={event.x_root}, y_root={event.y_root}, "
+            f"widget_rootx={event.widget.winfo_rootx()}, widget_rooty={event.widget.winfo_rooty()}"
+        )
         self.start_x = event.x_root
         self.start_y = event.y_root
         self.drag_canvas = self._find_canvas_for_widget(event.widget)
@@ -146,7 +175,10 @@ class SelectionOverlay:
         )
 
     def _on_button_release(self, event):
-        log(f"Mouse release: x_root={event.x_root}, y_root={event.y_root}, widget_rootx={event.widget.winfo_rootx()}, widget_rooty={event.widget.winfo_rooty()}")
+        log(
+            f"Mouse release: x_root={event.x_root}, y_root={event.y_root}, "
+            f"widget_rootx={event.widget.winfo_rootx()}, widget_rooty={event.widget.winfo_rooty()}"
+        )
         end_x = event.x_root
         end_y = event.y_root
         x1 = min(self.start_x, end_x)
